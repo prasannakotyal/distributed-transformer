@@ -1,0 +1,17 @@
+[project]
+name = "distributed-transformer"
+version = "0.1.0"
+description = "Distributed decoder-only Transformer training with PyTorch DDP and FSDP"
+requires-python = ">=3.10"
+dependencies = [
+  "torch>=2.3",
+  "numpy",
+  "requests",
+  "tqdm",
+  "datasets",
+  "tiktoken",
+  "matplotlib",
+]
+
+[tool.uv]
+package = false
