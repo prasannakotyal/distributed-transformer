@@ -15,12 +15,6 @@ COLORS = {
     "fsdp-2gpu-activation-checkpointing": "#009E73",
 }
 
-LINESTYLES = {
-    "single-gpu": "-",
-    "ddp-2gpu": "--",
-    "fsdp-2gpu-activation-checkpointing": "-.",
-}
-
 LABELS = {
     "single-gpu": "Single GPU",
     "ddp-2gpu": "DDP, 2 GPUs",
@@ -74,10 +68,6 @@ def color_for(name: str) -> str:
     return COLORS.get(name, "#4D4D4D")
 
 
-def linestyle_for(name: str) -> str:
-    return LINESTYLES.get(name, "-")
-
-
 def save_line_plot(
     runs: list[tuple[str, list[dict]]],
     x_key: str,
@@ -96,10 +86,9 @@ def save_line_plot(
             label=display_name(name),
             linewidth=2.4,
             color=color_for(name),
-            linestyle=linestyle_for(name),
         )
     ax.set_title(title)
-    ax.set_xlabel("Epoch equivalent" if x_key == "epoch_equivalent" else x_key)
+    ax.set_xlabel("Optimizer step" if x_key == "step" else x_key)
     ax.set_ylabel(ylabel)
     ax.grid(alpha=0.55)
     ax.spines["top"].set_visible(False)
@@ -189,15 +178,15 @@ def main() -> None:
 
     save_line_plot(
         runs,
-        "epoch_equivalent",
+        "step",
         "loss",
         "Training loss",
-        "Training loss over epoch-equivalent progress",
+        "Training loss over optimizer steps",
         args.output_dir / "loss_curves.png",
     )
     save_line_plot(
         runs,
-        "epoch_equivalent",
+        "step",
         "grad_norm",
         "Gradient norm",
         "Gradient norm during training",
@@ -205,7 +194,7 @@ def main() -> None:
     )
     save_line_plot(
         runs,
-        "epoch_equivalent",
+        "step",
         "tokens_per_sec",
         "Tokens/sec",
         "Throughput over training",
