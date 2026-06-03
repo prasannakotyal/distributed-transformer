@@ -518,7 +518,7 @@ def train() -> None:
                 should_sync = micro_step == config.grad_accum_steps - 1
                 sync_context = (
                     model.no_sync()
-                    if not should_sync and hasattr(model, "no_sync")
+                    if config.strategy == "ddp" and not should_sync
                     else nullcontext()
                 )
                 with sync_context:
