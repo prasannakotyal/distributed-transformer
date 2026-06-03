@@ -1,37 +1,31 @@
 # Distributed Transformer
 
-Decoder-only Transformer training in PyTorch with single-GPU, DDP, and FSDP
-execution paths. The project is built to benchmark distributed training behavior:
-tokens/sec, peak GPU memory, checkpoint overhead, and scaling efficiency.
+Decoder-only Transformer training with PyTorch DDP and FSDP. The project is an
+experiment-oriented implementation for measuring distributed training throughput,
+memory use, scaling efficiency, checkpoint overhead, and training stability.
 
-## Features
+## What is implemented
 
-- GPT-style decoder-only Transformer implemented from scratch in PyTorch
-- `torchrun` launch support for DDP and FSDP
+- GPT-style decoder-only Transformer in PyTorch
+- `torchrun` launch path for DDP and FSDP
 - FP16/BF16 mixed precision
+- Activation checkpointing
 - Gradient accumulation
-- Optional activation checkpointing
-- Save/resume checkpoints with optimizer state
-- JSONL benchmark logs for throughput, memory, and checkpoint timing
-- Synthetic, TinyShakespeare, and FineWeb-Edu data paths
+- Checkpoint save/resume with optimizer state
+- Per-step JSONL metrics for loss, grad norm, tokens/sec, peak memory, checkpoint time, and epoch-equivalent progress
+- Benchmark plots generated from recorded metrics
 
 ## Install
-
-Use `uv`:
 
 ```bash
 uv venv
 uv pip install -r requirements.txt
 ```
 
-Blackwell GPUs such as RTX PRO 4000 require a PyTorch build with `sm_120`
-support. The RunPod benchmark below used PyTorch `2.12.0+cu130`; the stock
-RunPod PyTorch `2.4.1+cu124` image failed on this GPU because it only supported
-up to `sm_90`.
+Use a CUDA PyTorch build that supports your GPU architecture. The recorded
+benchmarks used PyTorch `2.12.0+cu130`.
 
-## Local Smoke Test
-
-Run this before spending GPU credits:
+## Smoke test
 
 ```bash
 uv run python train.py \
@@ -47,16 +41,19 @@ uv run python train.py \
   --benchmark-name smoke-single
 ```
 
-## GPU Benchmark Commands
+## Experiment commands
 
-Single GPU baseline:
+Single GPU:
 
 ```bash
-uv run python train.py \
+CUDA_VISIBLE_DEVICES=0 uv run python train.py \
   --strategy single \
-  --dataset synthetic \
-  --max-steps 30 \
-  --save-interval 30 \
+  --dataset tinyshakespeare \
+  --max-steps 120 \
+  --warmup-steps 10 \
+  --eval-interval 20 \
+  --eval-iters 10 \
+  --save-interval 120 \
   --batch-size 16 \
   --grad-accum-steps 4 \
   --context-length 256 \
@@ -64,17 +61,20 @@ uv run python train.py \
   --num-layers 6 \
   --num-heads 4 \
   --precision fp16 \
-  --benchmark-name single-gpu
+  --benchmark-name single-gpu-tinyshakespeare
 ```
 
-Two-GPU DDP:
+DDP on two GPUs:
 
 ```bash
 uv run torchrun --standalone --nproc_per_node=2 train.py \
   --strategy ddp \
-  --dataset synthetic \
-  --max-steps 30 \
-  --save-interval 30 \
+  --dataset tinyshakespeare \
+  --max-steps 120 \
+  --warmup-steps 10 \
+  --eval-interval 20 \
+  --eval-iters 10 \
+  --save-interval 120 \
   --batch-size 16 \
   --grad-accum-steps 4 \
   --context-length 256 \
@@ -82,17 +82,21 @@ uv run torchrun --standalone --nproc_per_node=2 train.py \
   --num-layers 6 \
   --num-heads 4 \
   --precision fp16 \
-  --benchmark-name ddp-2gpu
+  --benchmark-name ddp-2gpu-tinyshakespeare \
+  --baseline-tokens-sec 92876.59029197277
 ```
 
-Two-GPU FSDP with activation checkpointing:
+FSDP on two GPUs with activation checkpointing:
 
 ```bash
 uv run torchrun --standalone --nproc_per_node=2 train.py \
   --strategy fsdp \
-  --dataset synthetic \
-  --max-steps 30 \
-  --save-interval 30 \
+  --dataset tinyshakespeare \
+  --max-steps 120 \
+  --warmup-steps 10 \
+  --eval-interval 20 \
+  --eval-iters 10 \
+  --save-interval 120 \
   --batch-size 16 \
   --grad-accum-steps 4 \
   --context-length 256 \
@@ -101,65 +105,106 @@ uv run torchrun --standalone --nproc_per_node=2 train.py \
   --num-heads 4 \
   --precision fp16 \
   --activation-checkpointing \
-  --benchmark-name fsdp-2gpu-activation-checkpointing
+  --benchmark-name fsdp-2gpu-tinyshakespeare \
+  --baseline-tokens-sec 92876.59029197277
 ```
 
-Summarize a run:
+Summarize metrics:
 
 ```bash
-uv run python summarize_benchmarks.py outputs/single-gpu/metrics.jsonl
+uv run python summarize_benchmarks.py results/tinyshakespeare/single-gpu.jsonl
 ```
 
-After the single-GPU summary prints `tokens_per_sec`, pass that value into the
-distributed summaries:
+Generate plots:
 
 ```bash
-uv run python summarize_benchmarks.py \
-  outputs/ddp-2gpu/metrics.jsonl \
-  --baseline-tokens-sec <single_gpu_tokens_per_sec>
+uv run python plot_benchmarks.py \
+  --runs \
+  results/tinyshakespeare/single-gpu.jsonl \
+  results/tinyshakespeare/ddp-2gpu.jsonl \
+  results/tinyshakespeare/fsdp-2gpu-activation-checkpointing.jsonl \
+  --output-dir assets
 ```
 
-## RunPod Starting Point
-
-Start with a 2x RTX PRO 4000 pod if available. From the provided screenshot, it
-is the lowest-cost listed multi-GPU option at `$0.57/hr` per GPU and has 24 GB
-VRAM per GPU, which is enough for the first distributed benchmark. If RunPod
-cannot allocate it, use 2x L40S at `$0.86/hr` per GPU.
-
-Use a PyTorch image with CUDA, SSH enabled, and enough disk for dependencies and
-checkpoints.
-
-## Measured Results
-
-Benchmark environment:
+## Benchmark setup
 
 - Hardware: 2x NVIDIA RTX PRO 4000 Blackwell, 24,467 MiB VRAM per GPU
 - Driver: 580.159.04
 - CUDA runtime reported by `nvidia-smi`: 13.0
 - PyTorch: 2.12.0+cu130
-- Dataset: synthetic tokens
-- Steps: 30, with the first step excluded from summary metrics
+- Dataset: TinyShakespeare tokenized with GPT-2 BPE
+- Model: 6 layers, 4 heads, 256 hidden size, 256 context length
+- Training: FP16, batch size 16 per rank, 4 gradient accumulation steps
+- Run length: 120 optimizer steps
 
-| Run | GPUs | Strategy | Tokens/sec | Peak memory | Checkpoint time | Scaling efficiency |
-|---|---:|---|---:|---:|---:|---:|
-| single-gpu | 1 | single | 104,777 | 907.5 MB | 0.352 s | n/a |
-| ddp-2gpu | 2 | DDP | 188,511 | 931.6 MB | 0.299 s | 0.900 |
-| fsdp-2gpu-activation-checkpointing | 2 | FSDP | 103,896 | 343.3 MB | 0.455 s | 0.496 |
+## Results
 
-Resume validation:
+The first step is excluded from throughput summaries to remove compile and warmup
+effects. Epoch-equivalent progress is computed from global tokens processed over
+the training split token count.
 
-- Single-GPU checkpoint resumed from `step_000029.pt` and completed step 30.
-- FSDP checkpoint resumed from `step_000029.pt` and completed step 30.
+| Run | GPUs | Strategy | Epoch-equivalent | Final train loss | Final eval loss | Tokens/sec | Peak memory | Checkpoint time | Scaling efficiency |
+|---|---:|---|---:|---:|---:|---:|---:|---:|---:|
+| single-gpu | 1 | single | 6.46 | 6.298 | 6.481 | 92,877 | 3,015 MB | 0.684 s | n/a |
+| ddp-2gpu | 2 | DDP | 12.93 | 6.298 | 6.482 | 166,045 | 3,087 MB | 0.669 s | 0.894 |
+| fsdp-2gpu-activation-checkpointing | 2 | FSDP | 12.93 | 6.298 | 6.482 | 97,080 | 2,428 MB | 0.929 s | 0.523 |
 
-## Checkpoint Resume
+## Plots
 
-Resume from a saved checkpoint:
+![Loss curves](assets/loss_curves.png)
+
+![Throughput](assets/throughput.png)
+
+![Gradient norm](assets/grad_norm.png)
+
+![Peak memory](assets/peak_memory.png)
+
+## Findings
+
+- DDP improved throughput from `92,877` to `166,045` tokens/sec, reaching `0.894` two-GPU scaling efficiency.
+- FSDP with activation checkpointing reduced peak memory from `3,087 MB` under DDP to `2,428 MB`, a `21.3%` reduction for the same two-GPU workload.
+- FSDP throughput was lower than DDP because sharding communication and activation recomputation dominated this small model.
+- Checkpoint overhead was modest for single-GPU and DDP runs. FSDP checkpointing was slower because full model and optimizer state are materialized from sharded state.
+- Gradient norms peaked during the high-learning-rate early phase, then settled as training loss flattened near `6.3`.
+
+## Checkpoint resume
+
+Single-GPU and FSDP checkpoints were both resumed from the final checkpoint and
+completed one additional optimizer step.
+
+Single-GPU resume:
 
 ```bash
-uv run python train.py \
+CUDA_VISIBLE_DEVICES=0 uv run python train.py \
   --strategy single \
-  --dataset synthetic \
-  --resume outputs/single-gpu/checkpoints/step_000029.pt \
-  --max-steps 35 \
-  --benchmark-name resume-single
+  --dataset tinyshakespeare \
+  --resume outputs/single-gpu-tinyshakespeare/checkpoints/step_000119.pt \
+  --max-steps 121 \
+  --batch-size 16 \
+  --grad-accum-steps 4 \
+  --context-length 256 \
+  --embedding-dim 256 \
+  --num-layers 6 \
+  --num-heads 4 \
+  --precision fp16 \
+  --benchmark-name resume-single-gpu
+```
+
+FSDP resume:
+
+```bash
+uv run torchrun --standalone --nproc_per_node=2 train.py \
+  --strategy fsdp \
+  --dataset tinyshakespeare \
+  --resume outputs/fsdp-2gpu-tinyshakespeare/checkpoints/step_000119.pt \
+  --max-steps 121 \
+  --batch-size 16 \
+  --grad-accum-steps 4 \
+  --context-length 256 \
+  --embedding-dim 256 \
+  --num-layers 6 \
+  --num-heads 4 \
+  --precision fp16 \
+  --activation-checkpointing \
+  --benchmark-name resume-fsdp-2gpu
 ```

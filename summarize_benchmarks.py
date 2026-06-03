@@ -45,6 +45,8 @@ def main() -> None:
         "world_size": first["world_size"],
         "steps": len(rows),
         "measured_steps": len(measured),
+        "final_loss": rows[-1]["loss"],
+        "final_epoch_equivalent": rows[-1].get("epoch_equivalent"),
         "tokens_per_sec": tokens_sec,
         "peak_memory_mb": peak_memory_mb,
         "checkpoint_time_sec": checkpoint_sec,

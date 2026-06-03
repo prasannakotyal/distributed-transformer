@@ -308,6 +308,22 @@ def reduce_max(value: float, config: TrainConfig, ctx: DistributedContext) -> fl
     return tensor.item()
 
 
+def clip_grad_norm(
+    model: nn.Module,
+    max_norm: float,
+    config: TrainConfig,
+    ctx: DistributedContext,
+) -> float:
+    if config.strategy == "fsdp" and hasattr(model, "clip_grad_norm_"):
+        grad_norm = model.clip_grad_norm_(max_norm)
+    else:
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+
+    if isinstance(grad_norm, torch.Tensor):
+        grad_norm = grad_norm.detach().item()
+    return reduce_max(float(grad_norm), config, ctx)
+
+
 @torch.no_grad()
 def estimate_loss(
     model: nn.Module,
@@ -474,6 +490,7 @@ def train() -> None:
             * config.grad_accum_steps
             * ctx.world_size
         )
+        train_tokens = len(train_loader.data)
         log_rank0(
             ctx,
             (
@@ -513,7 +530,7 @@ def train() -> None:
                     scaler.scale(loss).backward()
 
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
+            grad_norm = clip_grad_norm(model, config.grad_clip, config, ctx)
             scaler.step(optimizer)
             scaler.update()
 
@@ -549,18 +566,20 @@ def train() -> None:
                     "strategy": config.strategy,
                     "world_size": ctx.world_size,
                     "tokens_per_step": tokens_per_step,
+                    "epoch_equivalent": ((step + 1) * tokens_per_step) / train_tokens,
                     "step_time_sec": step_time,
                     "tokens_per_sec": tokens_sec,
                     "loss": mean_loss,
                     "eval_loss": eval_loss,
                     "learning_rate": lr,
+                    "grad_norm": grad_norm,
                     "peak_memory_mb": peak_memory_mb,
                     "checkpoint_time_sec": checkpoint_time,
                     "scaling_efficiency": scaling_efficiency,
                 }
                 write_metric(metrics_path, metric)
                 print(
-                    f"step={step} loss={mean_loss:.4f} "
+                    f"step={step} loss={mean_loss:.4f} grad_norm={grad_norm:.2f} "
                     f"tok/s={tokens_sec:.0f} mem_mb={peak_memory_mb:.0f}",
                     flush=True,
                 )
