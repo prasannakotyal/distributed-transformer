@@ -24,6 +24,11 @@ uv venv
 uv pip install -r requirements.txt
 ```
 
+Blackwell GPUs such as RTX PRO 4000 require a PyTorch build with `sm_120`
+support. The RunPod benchmark below used PyTorch `2.12.0+cu130`; the stock
+RunPod PyTorch `2.4.1+cu124` image failed on this GPU because it only supported
+up to `sm_90`.
+
 ## Local Smoke Test
 
 Run this before spending GPU credits:
@@ -126,13 +131,25 @@ checkpoints.
 
 ## Measured Results
 
-Measured GPU results are pending. Do not fill this table with estimates.
+Benchmark environment:
+
+- Hardware: 2x NVIDIA RTX PRO 4000 Blackwell, 24,467 MiB VRAM per GPU
+- Driver: 580.159.04
+- CUDA runtime reported by `nvidia-smi`: 13.0
+- PyTorch: 2.12.0+cu130
+- Dataset: synthetic tokens
+- Steps: 30, with the first step excluded from summary metrics
 
 | Run | GPUs | Strategy | Tokens/sec | Peak memory | Checkpoint time | Scaling efficiency |
 |---|---:|---|---:|---:|---:|---:|
-| single-gpu | 1 | single | pending | pending | pending | n/a |
-| ddp-2gpu | 2 | DDP | pending | pending | pending | pending |
-| fsdp-2gpu-activation-checkpointing | 2 | FSDP | pending | pending | pending | pending |
+| single-gpu | 1 | single | 104,777 | 907.5 MB | 0.352 s | n/a |
+| ddp-2gpu | 2 | DDP | 188,511 | 931.6 MB | 0.299 s | 0.900 |
+| fsdp-2gpu-activation-checkpointing | 2 | FSDP | 103,896 | 343.3 MB | 0.455 s | 0.496 |
+
+Resume validation:
+
+- Single-GPU checkpoint resumed from `step_000029.pt` and completed step 30.
+- FSDP checkpoint resumed from `step_000029.pt` and completed step 30.
 
 ## Checkpoint Resume
 
